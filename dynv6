@@ -1,23 +1,38 @@
-#!/bin/sh -e
-hostname=$1
-device=$2
-file=$HOME/.dynv6.addr6
-[ -e $file ] && old=`cat $file`
+#!/bin/sh
 
-if [ -z "$hostname" -o -z "$token" ]; then
-  echo "Usage: token=<your-authentication-token> [netmask=64] $0 your-name.dynv6.net [device]"
-  exit 1
-fi
+usage(){
+	echo ""
+	echo "Usage: $0 [-i interface] [-6 [-n netmask_length] ] [-4] -t token domain1 [domain2 ...]"
+	echo "\t-i interface: ethernet interface"
+	echo "\t-6 ipv6"
+	echo "\t-n netmask_length: netmask length of ipv6 address"
+	echo "\t-4 ipv4"
+	echo "\t-t token: from dynv6.com"
+	exit 1 # Exit script after printing help
+}
 
-if [ -z "$netmask" ]; then
-  netmask=128
-fi
+[ $# -lt 3 ] && usage
+interface=eth0
+netmask=128
 
-if [ -n "$device" ]; then
-  device="dev $device"
-fi
-address=$(ip -6 addr list scope global $device | grep -v " fd" | sed -n 's/.*inet6 \([0-9a-f:]\+\).*/\1/p' | head -n 1)
+while getopts "i:t:n:64" opt
+do
+	case "$opt" in
+	i ) device="$OPTARG";shift 2 ;;
+	n ) netmask="$OPTARG";shift 2 ;;
+	t ) token="$OPTARG";shift 2 ;;
+	6 ) ipv6=1;shift ;;
+	4 ) ipv4=1;shift ;;
+	? ) usage;;
+	esac
+done
 
+domains="$@"
+[ -z "$domains" -o -z "$token" ] && {
+	echo "No domain or token"
+	usage
+}
+####
 if [ -e /usr/bin/curl ]; then
   bin="curl -fsS"
 elif [ -e /usr/bin/wget ]; then
@@ -27,22 +42,66 @@ else
   exit 1
 fi
 
-if [ -z "$address" ]; then
-  echo "no IPv6 address found"
-  exit 1
-fi
+file=/tmp/.dynv6.addv6
+set -e
 
-# address with netmask
-current=$address/$netmask
+[ -n "$ipv6" ] && {
+  if [ -n "$device" ]; then
+    device="dev $device"
+  fi
 
-if [ "$old" = "$current" ]; then
-  echo "IPv6 address unchanged"
-  exit
-fi
+  #Latest IPv6 address depends on "preferred_lft"
+  address_list=`ip -6 addr list scope global $device | grep "^ *inet6 " -A 1 | sed '$!N;s/\n/ /'`
+  address_list=`echo "$address_list" | sed -n 's/.*inet6 \([0-9a-f:]\+\).*preferred_lft \([0-9]\+\)sec/\2 \1/p'`
+  address_list=`echo "$address_list" | awk '{printf ("%016d %s\n",$1,$2)}' | sort -r`
+  address=`echo "$address_list" | sed 's/.* //;q'`
+  if [ -z "$address" ]; then
+    echo "no IPv6 address found"
+    exit 1
+  fi
+  # address with netmask
+  current=$address/$netmask
+
+  [ -e $file ] && old=`cat $file`
+  if [ "$old" = "$current" ]; then
+    echo "IPv6 address unchanged"
+    exit
+  fi
+}
+
+set +e
 
 # send addresses to dynv6
-$bin "http://dynv6.com/api/update?hostname=$hostname&ipv6=$current&token=$token"
-$bin "http://ipv4.dynv6.com/api/update?hostname=$hostname&ipv4=auto&token=$token"
+FAIL=0
+for hostname in $domains
+do
+	[ -n "$ipv6" ] && {
+		#echo "$bin \"https://dynv6.com/api/update?hostname=$hostname&ipv6=$current&token=$token\""
+		$bin "https://dynv6.com/api/update?hostname=$hostname&ipv6=$current&token=$token"
+		[ $? = 0 ] || {
+			FAIL=1
+			break
+		}
+	}
+	[ -n "$ipv4" ] && {
+		#echo "$bin \"http://ipv4.dynv6.com/api/update?hostname=$hostname&ipv4=auto&token=$token\""
+		$bin "http://ipv4.dynv6.com/api/update?hostname=$hostname&ipv4=auto&token=$token"
+		[ $? = 0 ] || {
+			FAIL=1
+			break
+		}
+	}
+done
+# Check result
+[ "$FAIL" = "0" ] && {
+	[ -n "$current" ] && echo $current > $file
+	exit 0
+} 
+[ "$FAIL" = "1" ] && {
+	echo "Update domain Fail: device($device) ipv6($ipv6) ipv4($ipv4) token:($token)"
+	echo "\t$bin \"https://dynv6.com/api/update?hostname=$hostname&ipv6=$current&token=$token\""
+	echo "\t$bin \"http://ipv4.dynv6.com/api/update?hostname=$hostname&ipv4=auto&token=$token\""
+	logger -i -t dynv6 "Update domain for dynv6 fail"
+	rm -rf $file
+}
 
-# save current address
-echo $current > $file
