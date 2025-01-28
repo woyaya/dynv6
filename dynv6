@@ -26,6 +26,7 @@ do
 	? ) usage;;
 	esac
 done
+shift $((OPTIND-1))
 
 domains="$@"
 [ -z "$domains" -o -z "$token" ] && {
