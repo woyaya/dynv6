@@ -10,6 +10,27 @@ usage(){
 	echo "\t-t token: from dynv6.com"
 	exit 1 # Exit script after printing help
 }
+ipv6_get_addr_linux(){
+  local dev
+  local address_list
+  if [ -n "$1" ]; then
+    dev="dev $1"
+  else
+    dev=""
+  fi
+  #Latest IPv6 address depends on "preferred_lft"
+  address_list=`ip -6 addr list scope global $dev | grep "^ *inet6 " -A 1 | sed '$!N;s/\n/ /'`
+  address_list=`echo "$address_list" | sed -n 's/.*inet6 \([0-9a-f:]\+\).*preferred_lft \([0-9]\+\)sec/\2 \1/p'`
+  echo "$address_list" | awk '{printf ("%016d %s\n",$1,$2)}' | sort -r | sed 's/.* //;q'
+}
+ipv6_get_addr_macos(){
+  local dev
+  local address_list
+  dev=$1
+  address_list=`ifconfig -L $dev | grep '^\t*inet6.*pltime'`
+  address_list=`echo "$address_list" | sed 's/.*inet6 \([0-9a-f:]*\) .*pltime \([0-9]*\) .*/\2 \1/'`
+  echo "$address_list" | awk '{printf ("%016d %s\n",$1,$2)}' | sort -r | sed 's/.* //;q'
+}
 
 [ $# -lt 3 ] && usage
 interface=eth0
@@ -47,15 +68,19 @@ file=/tmp/.dynv6.addv6
 set -e
 
 [ -n "$ipv6" ] && {
-  if [ -n "$device" ]; then
-    device="dev $device"
-  fi
-
-  #Latest IPv6 address depends on "preferred_lft"
-  address_list=`ip -6 addr list scope global $device | grep "^ *inet6 " -A 1 | sed '$!N;s/\n/ /'`
-  address_list=`echo "$address_list" | sed -n 's/.*inet6 \([0-9a-f:]\+\).*preferred_lft \([0-9]\+\)sec/\2 \1/p'`
-  address_list=`echo "$address_list" | awk '{printf ("%016d %s\n",$1,$2)}' | sort -r`
-  address=`echo "$address_list" | sed 's/.* //;q'`
+  OS=`uname`
+  case "$OS" in
+  Linux)
+    address=`ipv6_get_addr_linux $device`
+  ;;
+  Darwin)
+    address=`ipv6_get_addr_macos $device`
+  ;;
+  *)
+    echo "Unsupported OS: $OS"
+    exit 1
+  ;;
+  esac
   if [ -z "$address" ]; then
     echo "no IPv6 address found"
     exit 1
