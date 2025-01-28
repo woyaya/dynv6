@@ -18,11 +18,11 @@ netmask=128
 while getopts "i:t:n:64" opt
 do
 	case "$opt" in
-	i ) device="$OPTARG";shift 2 ;;
-	n ) netmask="$OPTARG";shift 2 ;;
-	t ) token="$OPTARG";shift 2 ;;
-	6 ) ipv6=1;shift ;;
-	4 ) ipv4=1;shift ;;
+	i ) device="$OPTARG";;
+	n ) netmask="$OPTARG";;
+	t ) token="$OPTARG";;
+	6 ) ipv6=1;;
+	4 ) ipv4=1;;
 	? ) usage;;
 	esac
 done
