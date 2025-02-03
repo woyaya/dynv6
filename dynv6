@@ -27,7 +27,7 @@ ipv6_get_addr_macos(){
   local dev
   local address_list
   dev=$1
-  address_list=`ifconfig -L $dev | grep '^\t*inet6.*pltime'`
+  address_list=`/sbin/ifconfig -L $dev | grep '^\t*inet6.*pltime'`
   address_list=`echo "$address_list" | sed 's/.*inet6 \([0-9a-f:]*\) .*pltime \([0-9]*\) .*/\2 \1/'`
   echo "$address_list" | awk '{printf ("%016d %s\n",$1,$2)}' | sort -r | sed 's/.* //;q'
 }
